@@ -25,12 +25,12 @@ module.exports = {
                 new HDWalletProvider(
                     process.env.DEV_MNEMONIC,
                     'https://mainnet.infura.io/v3/' + infuraProjectId,
-                    1,
+                    0,
                     10
                 ),
             networkId: 1,
             gas: 5000000,
-            gasPrice: 20e9,
+            gasPrice: 110e9,
         },
     },
 };

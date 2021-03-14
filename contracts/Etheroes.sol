@@ -36,6 +36,11 @@ contract Etheroes is Initializable, ERC721Upgradeable, OwnableUpgradeable {
 
     uint256 constant TOTAL_SUPPLY = 10000;
 
+    uint private _levelUpCost;
+    bool private _phase2Initialized;
+
+    event LevelUp(uint256 indexed tokenId, uint newLevel);
+
     function initialize() public initializer {
         __ERC721_init("EtHeroes", "HERO");
         _setBaseURI("https://api.etheroes.io/char/");
@@ -133,15 +138,14 @@ contract Etheroes is Initializable, ERC721Upgradeable, OwnableUpgradeable {
         require(msg.value >= salePrice, "Not enough funds");
 
         payable(originalOwner).transfer(salePrice);
-        _transferAndClear(originalOwner, msg.sender, token);
+        _safeTransfer(originalOwner, msg.sender, token, "");
         msg.sender.transfer(msg.value - salePrice);
 
         emit Sale(token, originalOwner, msg.sender, salePrice);
     }
 
-    function _transferAndClear(address from, address to, uint256 token) private {
-        _safeTransfer(from, to, token, "");
-        _tokenForSale[token] = 0;
+    function _beforeTokenTransfer(address, address, uint256 tokenId) internal override {
+        _tokenForSale[tokenId] = 0;
     }
 
     function listTokensForSale() external view returns(uint256[] memory) {
@@ -164,28 +168,75 @@ contract Etheroes is Initializable, ERC721Upgradeable, OwnableUpgradeable {
     }
 
     function salePrice(uint256 token) external view returns(uint) {
-        require(_tokenForSale[token] > 0, "Token is not for sale");
+        require(token <= _tokenIdNew.current(), "Invalid token ID");
 
         return _tokenForSale[token];
     }
 
     function getTokenLevel(uint256 token) external view returns(uint) {
-        require(_tokenLevels[token] > 0, "Invalid token ID");
+        require(token <= _tokenIdNew.current(), "Invalid token ID");
+
+        if (_tokenLevels[token] == 0) {
+            return 1;
+        }
 
         return _tokenLevels[token];
     }
 
-    function getTokenNextAvailableLevelUp(uint256 token) external view returns(uint) {
-        require(_tokenLevels[token] > 0, "Invalid token ID");
-
-        uint currentLevel = _tokenLevels[token];
-
-        uint requiredElapse = 300 * (16 ** (currentLevel - 1)) / (10 ** (currentLevel - 1));
+    function tokenCanLevelUp(uint256 token) external view returns(uint) {
+        require(token <= _tokenIdNew.current(), "Invalid token ID");
 
         if (_tokenLastUpgraded[token] == 0) {
-            return block.number + requiredElapse;
+            return 0;
         } else {
-            return _tokenLastUpgraded[token] + requiredElapse;
+            uint currentLevel = _tokenLevels[token];
+            if (currentLevel == 0) {
+                currentLevel = 1;
+            }
+
+            uint requiredElapse = 300 * (15 ** (currentLevel - 1)) / (10 ** (currentLevel - 1));
+
+            if (block.number >= _tokenLastUpgraded[token] + requiredElapse) {
+                return 0;
+            } else {
+                return _tokenLastUpgraded[token] + requiredElapse - block.number;
+            }
         }
+    }
+
+    function levelUpToken(uint256 token) external payable {
+        require(token <= _tokenIdNew.current(), "Invalid token ID");
+        require(this.tokenCanLevelUp(token) == 0, "Not ready to level up");
+
+        require(ownerOf(token) == msg.sender, "You are not the owner");
+        require(msg.value >= _levelUpCost, "Not enough funds");
+
+        if (_tokenLevels[token] == 0) {
+            _tokenLevels[token] = 2;
+        } else {
+            _tokenLevels[token] += 1;
+        }
+
+        _tokenLastUpgraded[token] = block.number;
+
+        // refund
+        msg.sender.transfer(msg.value - _levelUpCost);
+
+        emit LevelUp(token, _tokenLevels[token]);
+    }
+
+    function phase2Initialize() public {
+        require(!_phase2Initialized);
+        _claimCost = 2e16;
+        _levelUpCost = 5e16;
+        _phase2Initialized = true;
+    }
+
+    function getLevelUpCost() external view returns(uint) {
+        return _levelUpCost;
+    }
+
+    function adminSetLevelUpCost(uint levelUpCost) external onlyOwner {
+        _levelUpCost = levelUpCost;
     }
 }
